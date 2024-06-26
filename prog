@@ -1,0 +1,342 @@
+using System;
+using System.Linq;
+using System.Data.Entity;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Navigation;
+
+namespace WpfApplProject
+{
+    /// <summary>
+    /// Логика взаимодействия для Page1.xaml
+    /// </summary>
+    public partial class PageMain : Page
+    {
+        public PageMain()
+        {
+            InitializeComponent();
+            labelName.Visibility = Visibility.Hidden;
+            labelPass1.Visibility = Visibility.Hidden;
+        }
+        
+        public class DataTransfer
+        {
+            public static int UserID { get; set; }
+            public static string Username { get; set; }
+            public static string Password { get; set; }
+            public static string Role { get; set; }
+
+        }
+        private void BtEntry(object sender, RoutedEventArgs e)
+        {
+            string passw = (inputPass1.Password);
+            labelName.Content = "";
+            labelPass1.Content = "";
+
+            if (inputName.Text == "")
+            {
+                labelName.Content = "Введите Логин";
+                labelName.Visibility = Visibility.Visible;
+            }
+            if ((inputPass1.Password) == "")
+            {
+                labelPass1.Content = "Введите Пароль";
+                labelPass1.Visibility = Visibility.Visible;
+            }
+
+            User db = new User();
+            db = ErrorsEntities.GetContext().Users.Where(b => b.Username == inputName.Text
+                                                          && b.Password == passw).FirstOrDefault();
+
+            if (db == null)
+            {
+                MessageBox.Show("Пользователь не найден");
+                return;
+            }
+
+            DataTransfer.Username = db.Username;
+            DataTransfer.Password = db.Password;
+            DataTransfer.Role = db.Role;
+
+
+            if (DataTransfer.Role == "admin")
+            {
+                NavigationService.Navigate(new PageEmployee());
+            }
+            else
+            {
+                NavigationService.Navigate(new PageEmployeeUser());
+            }
+        }
+
+        private void BtExit(object sender, RoutedEventArgs e)
+        {
+            Application.Current.Shutdown();
+        }
+    }
+}
+
+
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Data.SqlClient;
+
+namespace WpfApplProject
+{
+    /// <summary>
+    /// Логика взаимодействия для PageEmployeeUser.xaml
+    /// </summary>
+    public partial class PageEmployeeUser : Page
+    {
+        private List<ErrorLog> allErrorLogs = new List<ErrorLog>();
+       private string connectionString = "Server=LAPTOP-ABALRHT7;Database=Errors;";
+
+        public PageEmployeeUser()
+        {
+            InitializeComponent();
+            LoadErrorTypes();
+            LoadAllErrorLogs();
+        }
+
+        public class ErrorLog
+        {
+            public int LogId { get; set; }
+            public string SoftwareName { get; set; }
+            public string ErrorType { get; set; }
+            public string ErrorMessage { get; set; }
+            public string StackTrace { get; set; }
+            public DateTime DateTimeStamp { get; set; }
+        }
+
+        private void LoadErrorTypes()
+        {
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                string query = "SELECT DISTINCT ErrorType FROM ErrorLogs";
+                SqlCommand command = new SqlCommand(query, connection);
+
+                try
+                {
+                    connection.Open();
+                    SqlDataReader reader = command.ExecuteReader();
+                    List<string> errorTypes = new List<string>();
+
+                    while (reader.Read())
+                    {
+                        errorTypes.Add(reader["ErrorType"].ToString());
+                    }
+
+                    Combo.ItemsSource = errorTypes;
+                    Combo.SelectedIndex = 0;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error loading error types: " + ex.Message);
+                }
+            }
+        }
+
+        private void LoadAllErrorLogs()
+        {
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                string query = "SELECT * FROM ErrorLogs";
+                SqlCommand command = new SqlCommand(query, connection);
+
+                try
+                {
+                    connection.Open();
+                    SqlDataReader reader = command.ExecuteReader();
+
+                    while (reader.Read())
+                    {
+                        allErrorLogs.Add(new ErrorLog
+                        {
+                            LogId = (int)reader["Log_Id"],
+                            SoftwareName = reader["Software"].ToString(),
+                            ErrorType = reader["ErrorType"].ToString(),
+                            ErrorMessage = reader["ErrorMessage"].ToString(),
+                            StackTrace = reader["StackTrace"].ToString(),
+                            DateTimeStamp = (DateTime)reader["DateTime"]
+                        });
+                    }
+
+                    DataGridErrors.ItemsSource = allErrorLogs;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error loading error logs: " + ex.Message);
+                }
+            }
+        }
+
+        private void Find_Button_Click(object sender, RoutedEventArgs e)
+        {
+            string selectedErrorType = Combo.SelectedItem?.ToString();
+
+            if (!string.IsNullOrEmpty(selectedErrorType))
+            {
+                var filteredErrorLogs = allErrorLogs.Where(log => log.ErrorType == selectedErrorType).ToList();
+                DataGridErrors.ItemsSource = filteredErrorLogs;
+            }
+            else
+            {
+                MessageBox.Show("Please select an error type.");
+            }
+        }
+
+        private void Combo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+        }
+    }
+}
+
+
+
+using System;
+using System.Collections.Generic;
+using System.Data.Entity;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+
+namespace WpfApplProject
+{
+    public partial class PageEmployee : Page
+    {
+        private readonly ErrorsEntities _context;
+        private List<ErrorLog> items = null;
+        private bool isDirty = true;
+        private string action = "";
+
+        public PageEmployee()
+        {
+            InitializeComponent();
+            _context = ErrorsEntities.GetContext();
+            DataGridErrors.ItemsSource = _context.ErrorLogs.ToList();
+            FillComboBoxWithCategories();
+        }
+
+        private void FillComboBoxWithCategories()
+        {
+            var categories = _context.ErrorLogs
+                .Select(u => u.ErrorType)
+                .Distinct()
+                .ToList();
+            categories.Insert(0, (byte)0); // Вставляем значение по умолчанию
+
+            Combo.ItemsSource = categories;
+            Combo.SelectedIndex = 0;
+        }
+
+        private void Page_Loaded(object sender, RoutedEventArgs e)
+        {
+            FillComboBoxWithCategories();
+        }
+
+        private void New_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            DataGridErrors.IsReadOnly = false;
+
+            int maxId = _context.ErrorLogs.Max(i => i.Log_Id);
+            ErrorLog errorLog = new ErrorLog()
+            {
+                Log_Id = maxId + 1,
+                Software = new Software { Name = "Введите название ПО" },
+                ErrorType = 0, // Значение по умолчанию для типа byte
+                ErrorMessage = "Введите сообщение об ошибке",
+                StackTrace = "Введите трассировку стека",
+                DateTime = DateTime.Now
+            };
+            _context.ErrorLogs.Add(errorLog);
+            try
+            {
+                _context.SaveChanges();
+                DataGridErrors.ItemsSource = _context.ErrorLogs.ToList();
+                DataGridErrors.Items.Refresh();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+            action = "add";
+            isDirty = false;
+        }
+
+        private void Save_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            _context.SaveChanges();
+            DataGridErrors.ItemsSource = _context.ErrorLogs.ToList();
+            DataGridErrors.Items.Refresh();
+            DataGridErrors.IsReadOnly = true;
+            action = "";
+            isDirty = true;
+            MessageBox.Show("Сохранить");
+        }
+
+        private void Save_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+        {
+            e.CanExecute = !isDirty;
+        }
+
+        private void Delete_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            ErrorLog selectedErrorLog = DataGridErrors.SelectedItem as ErrorLog;
+            if (selectedErrorLog != null)
+            {
+                MessageBoxResult result = MessageBox.Show("Удалить данные?", "Предупреждение", MessageBoxButton.OKCancel);
+                if (result == MessageBoxResult.OK)
+                {
+                    _context.ErrorLogs.Remove(selectedErrorLog);
+                    _context.SaveChanges();
+                    DataGridErrors.ItemsSource = _context.ErrorLogs.ToList();
+                    DataGridErrors.Items.Refresh();
+                }
+            }
+            else
+            {
+                MessageBox.Show("Выберите строку для удаления");
+            }
+            action = "";
+            isDirty = true;
+        }
+
+        private void Delete_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+        {
+            e.CanExecute = isDirty;
+        }
+
+        private void Find_Button_Click(object sender, RoutedEventArgs e)
+        {
+            DataGridErrors.ItemsSource = items;
+        }
+
+        private void ComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+        }
+
+        private void Combo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+        }
+
+        private void MenuItem_Click(object sender, RoutedEventArgs e)
+        {
+        }
+
+        private void DataGridErrors_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+        }
+
+        private void TextBoxNazvanie_TextChanged(object sender, TextChangedEventArgs e)
+        {
+        }
+    }
+}
